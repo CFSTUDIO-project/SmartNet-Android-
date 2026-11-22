@@ -53,7 +53,7 @@ object UiKit {
         TextView(context).apply {
             this.text = value
             this.textSize = 14f
-            setTextColor(if (primary) Color.rgb(5, 18, 28) else text)
+            setTextColor(if (primary) Color.rgb(5, 18, 28) else UiKit.text)
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             gravity = Gravity.CENTER
             setPadding(dp(context, 18f), dp(context, 13f), dp(context, 18f), dp(context, 13f))
