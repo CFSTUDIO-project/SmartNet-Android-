@@ -12,6 +12,15 @@
         android:theme="@style/Theme.SmartNet"
         android:usesCleartextTraffic="false">
 
+        <!-- Required: Shizuku sends its Binder to this provider when the app starts. -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true">
