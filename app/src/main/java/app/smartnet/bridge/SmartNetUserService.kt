@@ -21,7 +21,10 @@ class SmartNetUserService : ISmartNetController.Stub() {
     @Volatile private var activityTaskManager: Any? = null
     private val taskManagerClass by lazy { Class.forName("android.app.IActivityTaskManager") }
 
-    override fun ping(): Boolean = runCatching { activityTaskManager() != null }.getOrDefault(false)
+    // AIDL ping only confirms that the Shizuku UserService process and Binder
+    // are alive. Do not couple connection state to hidden Android API access:
+    // OEM restrictions can block ActivityTaskManager while the Binder is healthy.
+    override fun ping(): Boolean = true
 
     override fun readFreeformSettings(): String {
         val enabled = settingGet(SETTINGS_ENABLE)
