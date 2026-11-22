@@ -11,7 +11,7 @@ import android.util.Log
  * APIs to request real freeform tasks. It never substitutes a screenshot or a
  * fake app surface when the device refuses the request.
  */
-class SmartNetUserService : ISmartNetController.Stub() {
+class SmartNetUserService : ISmartNetController.Stub {
 
     // Shizuku v13+ prefers the Context constructor when creating a UserService.
     // Keep the no-argument constructor for compatibility with older versions.
