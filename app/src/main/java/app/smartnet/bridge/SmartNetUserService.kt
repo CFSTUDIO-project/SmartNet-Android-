@@ -1,6 +1,7 @@
 package app.smartnet.bridge
 
 import android.content.ComponentName
+import android.content.Context
 import android.graphics.Rect
 import android.os.IBinder
 import android.util.Log
@@ -11,6 +12,19 @@ import android.util.Log
  * fake app surface when the device refuses the request.
  */
 class SmartNetUserService : ISmartNetController.Stub() {
+
+    // Shizuku v13+ prefers the Context constructor when creating a UserService.
+    // Keep the no-argument constructor for compatibility with older versions.
+    constructor() : super() {
+        Log.i("SmartNet-System", "UserService created with default constructor")
+    }
+
+    constructor(context: Context) : this() {
+        // This Context belongs to the Shizuku service process; do not retain it
+        // or use app-only APIs from this process.
+        Log.i("SmartNet-System", "UserService created through Shizuku Context constructor")
+    }
+
     companion object {
         private const val TAG = "SmartNet-System"
         private const val FREEFORM_MODE = 5
