@@ -132,17 +132,17 @@ class MainActivity : Activity(), Shizuku.OnRequestPermissionResultListener, Shiz
         systemCard.addView(UiKit.text(this, "SYSTEM CONNECTION", 10f, UiKit.cyan, true))
         systemCard.addView(UiKit.text(this, "Shizuku", 16f, UiKit.text, true).apply { setPadding(0, UiKit.dp(this@MainActivity, 9f), 0, UiKit.dp(this@MainActivity, 4f)) })
         systemCard.addView(UiKit.text(this, "Diperlukan untuk meminta Android mengelola task dan freeform window. Shizuku harus dijalankan terlebih dahulu.", 12f, UiKit.muted))
-        val shizukuStatus = UiKit.text(this, shizukuStatusText(), 12f, if (ShizukuBridge.controller != null) UiKit.green else UiKit.yellow, true).apply {
+        val shizukuStatus = UiKit.text(this, shizukuStatusText(), 12f, if (ShizukuBridge.controller != null) UiKit.green else if (ShizukuBridge.lastError.isNotBlank()) UiKit.yellow else UiKit.yellow, true).apply {
             setPadding(0, UiKit.dp(this@MainActivity, 12f), 0, UiKit.dp(this@MainActivity, 10f))
         }
         systemCard.addView(shizukuStatus)
-        val shizukuButton = UiKit.button(this, if (!ShizukuBridge.isBinderRunning()) "Buka panduan Shizuku" else if (!ShizukuBridge.hasPermission()) "Izinkan Shizuku" else "Hubungkan service", true)
+        val shizukuButton = UiKit.button(this, if (!ShizukuBridge.isBinderRunning()) "Buka panduan Shizuku" else if (!ShizukuBridge.hasPermission()) "Izinkan Shizuku" else if (ShizukuBridge.lastError.isNotBlank()) "Coba hubungkan ulang" else "Hubungkan service", true)
         shizukuButton.setOnClickListener {
             when {
                 !ShizukuBridge.isBinderRunning() -> openShizukuGuide()
                 !ShizukuBridge.hasPermission() -> ShizukuBridge.requestPermission()
                 else -> {
-                    ShizukuBridge.bindIfAuthorized()
+                    if (ShizukuBridge.lastError.isNotBlank()) ShizukuBridge.retry() else ShizukuBridge.bindIfAuthorized()
                     Toast.makeText(this, "Menghubungkan service sistem…", Toast.LENGTH_SHORT).show()
                     renderSetup()
                     scheduleSetupRefresh()
@@ -214,7 +214,8 @@ class MainActivity : Activity(), Shizuku.OnRequestPermissionResultListener, Shiz
     private fun shizukuStatusText(): String = when {
         !ShizukuBridge.isBinderRunning() -> "NOT RUNNING · Mulai Shizuku dari aplikasinya"
         !ShizukuBridge.hasPermission() -> "WAITING · Berikan izin saat diminta Shizuku"
-        ShizukuBridge.controller == null -> "CONNECTING · Menghubungkan UserService"
+        ShizukuBridge.controller == null && ShizukuBridge.lastError.isNotBlank() -> "CONNECTION ISSUE · ${ShizukuBridge.lastError}"
+        ShizukuBridge.controller == null -> "CONNECTING · Menunggu callback UserService"
         else -> "CONNECTED · System service ready"
     }
 
@@ -237,7 +238,7 @@ class MainActivity : Activity(), Shizuku.OnRequestPermissionResultListener, Shiz
 
     private var lastSetupSignature = ""
     private fun renderSetupOnceIfStateChanged() {
-        val signature = "${ShizukuBridge.isBinderRunning()}-${ShizukuBridge.hasPermission()}-${ShizukuBridge.controller != null}-${Settings.canDrawOverlays(this)}"
+        val signature = "${ShizukuBridge.isBinderRunning()}-${ShizukuBridge.hasPermission()}-${ShizukuBridge.controller != null}-${ShizukuBridge.lastError}-${Settings.canDrawOverlays(this)}"
         if (signature != lastSetupSignature) {
             lastSetupSignature = signature
             renderSetup()
