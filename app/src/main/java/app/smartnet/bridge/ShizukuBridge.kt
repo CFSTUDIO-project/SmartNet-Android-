@@ -22,17 +22,83 @@ object ShizukuBridge {
         private set
     @Volatile private var bindRequested = false
 
-    private val handler = Handler(Looper.getMainLooper())
+    private val handler: Handler = Handler(Looper.getMainLooper())
     private lateinit var appContext: Context
-    @Volatile private var initialized = false
+    @Volatile private var initialized: Boolean = false
 
-    private val args by lazy {
-        Shizuku.UserServiceArgs(
-            ComponentName(appContext.packageName, SmartNetUserService::class.java.name)
-        ).daemon(false)
+    private val serviceComponent: ComponentName by lazy {
+        ComponentName(appContext.packageName, SmartNetUserService::class.java.name)
+    }
+
+    private val args: Shizuku.UserServiceArgs by lazy {
+        Shizuku.UserServiceArgs(serviceComponent)
+            .daemon(false)
             .processNameSuffix("system")
             .tag(USER_SERVICE_TAG)
             .version(3)
+    }
+
+    // Declared separately because the timeout and ServiceConnection refer to each other.
+    private lateinit var connection: ServiceConnection
+    private lateinit var connectTimeout: Runnable
+
+    init {
+        connectTimeout = Runnable {
+            if (bindRequested && controller == null) {
+                runCatching { Shizuku.unbindUserService(args, connection, true) }
+                    .onFailure { Log.w(TAG, "Timed-out UserService cleanup failed", it) }
+                clearConnectionState(
+                    "UserService tidak merespons dalam 12 detik. Periksa izin SmartNet di Shizuku lalu coba lagi."
+                )
+            }
+        }
+
+        connection = object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+                handler.removeCallbacks(connectTimeout)
+                if (service == null || !service.isBinderAlive) {
+                    clearConnectionState("Shizuku mengembalikan Binder kosong atau sudah mati.")
+                    return
+                }
+
+                val remote: ISmartNetController? = ISmartNetController.Stub.asInterface(service)
+                if (remote == null) {
+                    clearConnectionState("Interface SmartNet UserService tidak dapat dibaca.")
+                    return
+                }
+
+                try {
+                    if (!remote.ping()) {
+                        clearConnectionState("UserService tersambung, tetapi pemeriksaan sistem gagal.")
+                        runCatching { Shizuku.unbindUserService(args, connection, true) }
+                        return
+                    }
+                    controller = remote
+                    bindRequested = true
+                    lastError = ""
+                    Log.i(TAG, "UserService connected and ping verified")
+                } catch (e: Exception) {
+                    clearConnectionState(
+                        "UserService hidup tetapi ping gagal: ${e.message ?: e.javaClass.simpleName}"
+                    )
+                    runCatching { Shizuku.unbindUserService(args, connection, true) }
+                }
+            }
+
+            override fun onServiceDisconnected(name: ComponentName?) {
+                clearConnectionState("UserService terputus. Tekan Hubungkan service lagi.")
+            }
+
+            override fun onBindingDied(name: ComponentName?) {
+                clearConnectionState("Binding UserService mati. Coba hubungkan ulang.")
+                runCatching { Shizuku.unbindUserService(args, connection, true) }
+            }
+
+            override fun onNullBinding(name: ComponentName?) {
+                clearConnectionState("Shizuku tidak mengembalikan UserService. Periksa izin aplikasi di Shizuku.")
+                runCatching { Shizuku.unbindUserService(args, connection, true) }
+            }
+        }
     }
 
     private fun clearConnectionState(message: String) {
@@ -43,70 +109,16 @@ object ShizukuBridge {
         Log.e(TAG, message)
     }
 
-    private val connectTimeout = Runnable {
-        if (bindRequested && controller == null) {
-            // Always remove the server-side connection, even if the local timeout
-            // already elapsed. Otherwise a retry can attach to a stale request.
-            runCatching { Shizuku.unbindUserService(args, connection, true) }
-                .onFailure { Log.w(TAG, "Timed-out UserService cleanup failed", it) }
-            clearConnectionState(
-                "UserService tidak merespons dalam 12 detik. Periksa izin SmartNet di Shizuku lalu coba lagi."
-            )
-        }
-    }
-
-    private val connection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-            handler.removeCallbacks(connectTimeout)
-            if (service == null || !service.isBinderAlive) {
-                clearConnectionState("Shizuku mengembalikan Binder kosong atau sudah mati.")
-                return
-            }
-            val remote = ISmartNetController.Stub.asInterface(service)
-            if (remote == null) {
-                clearConnectionState("Interface SmartNet UserService tidak dapat dibaca.")
-                return
-            }
-            try {
-                // Verify the remote AIDL endpoint before reporting READY.
-                if (!remote.ping()) {
-                    clearConnectionState("UserService tersambung, tetapi pemeriksaan sistem gagal.")
-                    runCatching { Shizuku.unbindUserService(args, connection, true) }
-                    return
-                }
-                controller = remote
-                bindRequested = true
-                lastError = ""
-                Log.i(TAG, "UserService connected and ping verified")
-            } catch (e: Exception) {
-                clearConnectionState("UserService hidup tetapi ping gagal: ${e.message ?: e.javaClass.simpleName}")
-                runCatching { Shizuku.unbindUserService(args, connection, true) }
-            }
+    private val binderReceivedListener: Shizuku.OnBinderReceivedListener =
+        Shizuku.OnBinderReceivedListener {
+            Log.i(TAG, "Shizuku binder received")
+            if (hasPermission()) bindIfAuthorized()
         }
 
-        override fun onServiceDisconnected(name: ComponentName?) {
-            clearConnectionState("UserService terputus. Tekan Hubungkan service lagi.")
+    private val binderDeadListener: Shizuku.OnBinderDeadListener =
+        Shizuku.OnBinderDeadListener {
+            clearConnectionState("Shizuku berhenti. Jalankan Shizuku lalu hubungkan ulang.")
         }
-
-        override fun onBindingDied(name: ComponentName?) {
-            clearConnectionState("Binding UserService mati. Coba hubungkan ulang.")
-            runCatching { Shizuku.unbindUserService(args, connection, true) }
-        }
-
-        override fun onNullBinding(name: ComponentName?) {
-            clearConnectionState("Shizuku tidak mengembalikan UserService. Periksa izin aplikasi di Shizuku.")
-            runCatching { Shizuku.unbindUserService(args, connection, true) }
-        }
-    }
-
-    private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
-        Log.i(TAG, "Shizuku binder received")
-        if (hasPermission()) bindIfAuthorized()
-    }
-
-    private val binderDeadListener = Shizuku.OnBinderDeadListener {
-        clearConnectionState("Shizuku berhenti. Jalankan Shizuku lalu hubungkan ulang.")
-    }
 
     @Synchronized
     fun initialize(context: Context) {
@@ -155,13 +167,15 @@ object ShizukuBridge {
         return try {
             lastError = ""
             bindRequested = true
-            Log.i(TAG, "Requesting UserService: ${args.componentName}")
+            Log.i(TAG, "Requesting UserService: $serviceComponent")
             Shizuku.bindUserService(args, connection)
             handler.removeCallbacks(connectTimeout)
             handler.postDelayed(connectTimeout, CONNECT_TIMEOUT_MS)
             true
         } catch (e: Exception) {
-            clearConnectionState("Gagal meminta UserService: ${e.message ?: e.javaClass.simpleName}")
+            clearConnectionState(
+                "Gagal meminta UserService: ${e.message ?: e.javaClass.simpleName}"
+            )
             false
         }
     }
@@ -169,8 +183,6 @@ object ShizukuBridge {
     @Synchronized
     fun unbind() {
         handler.removeCallbacks(connectTimeout)
-        // Do not gate this call on bindRequested: timeout may already have
-        // cleared the local flag while Shizuku still holds a server-side entry.
         runCatching { Shizuku.unbindUserService(args, connection, true) }
             .onFailure { Log.w(TAG, "UserService unbind failed", it) }
         controller = null
